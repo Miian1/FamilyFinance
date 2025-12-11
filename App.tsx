@@ -54,11 +54,12 @@ export default function App() {
       const { data: { session } } = await supabase.auth.getSession();
       
       // 2. Define all promises for parallel execution
+      // Optimization: Limit transactions to recent 500 to improve initial load speed
       const profilesPromise = supabase.from('profiles').select('*');
       const personalPromise = supabase.from('accounts').select('*');
       const groupPromise = supabase.from('group_accounts').select('*');
       const categoriesPromise = supabase.from('categories').select('*');
-      const transactionsPromise = supabase.from('transactions').select('*').order('date', { ascending: false });
+      const transactionsPromise = supabase.from('transactions').select('*').order('date', { ascending: false }).limit(500);
       
       const notificationsPromise = session 
         ? supabase.from('notifications').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false })
@@ -166,21 +167,21 @@ export default function App() {
     const initSession = async () => {
       setLoading(true);
       
-      // Safety timeout: Ensure loading spinner disappears after 6 seconds max
+      // Safety timeout: Ensure loading spinner disappears quickly (4s max)
       const timeoutId = setTimeout(() => {
-        if (isMounted) {
-            console.warn("Session init timed out, forcing loading to false.");
+        if (isMounted && loading) {
+            console.warn("Session init taking too long, showing UI.");
             setLoading(false);
         }
-      }, 6000);
+      }, 4000);
 
       try {
-          // Get session
+          // 1. Critical Path: Auth & Profile Only
+          // This must happen before showing the app shell
           const { data: { session }, error: sessionError } = await supabase.auth.getSession();
           if (sessionError) throw sessionError;
           
           if (session && isMounted) {
-             // Get profile for current user
              const { data: profile, error: profileError } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
              
              if (profileError && profileError.code !== 'PGRST116') {
@@ -196,8 +197,6 @@ export default function App() {
                  role: profile.role || 'member',
                  avatar: profile.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=random`
                });
-               // Optimized fetch
-               await fetchData();
              }
           }
       } catch (err) {
@@ -205,9 +204,16 @@ export default function App() {
           if (isMounted) setCurrentUser(null);
       } finally {
           clearTimeout(timeoutId);
+          // 2. Unblock UI immediately after knowing who the user is
           if (isMounted) {
               setLoading(false);
           }
+      }
+
+      // 3. Background Fetch: Load heavy data after UI is visible
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session && isMounted) {
+          await fetchData();
       }
     };
 
@@ -224,7 +230,6 @@ export default function App() {
            }
        } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
            if (session && isMounted) {
-               // Redundant fetch to ensure sync, but without setting global loading to true to avoid flash
                const { data: profile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
                if (profile && isMounted) {
                    setCurrentUser({
@@ -234,6 +239,7 @@ export default function App() {
                        role: profile.role,
                        avatar: profile.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.name)}&background=random`
                    });
+                   // Fetch data in background
                    fetchData();
                }
            }
