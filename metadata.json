@@ -1,0 +1,5 @@
+{
+  "name": "FamilyFinance",
+  "description": "A comprehensive family finance management dashboard allowing admins to track family spending, manage accounts, and visualize data with beautiful charts.",
+  "requestFramePermissions": []
+}
