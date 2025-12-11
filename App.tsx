@@ -50,8 +50,38 @@ export default function App() {
 
   const fetchData = async () => {
     try {
-      // Fetch Users/Profiles
-      const { data: profilesData } = await supabase.from('profiles').select('*');
+      // 1. Get Session for user ID usage
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      // 2. Define all promises for parallel execution
+      const profilesPromise = supabase.from('profiles').select('*');
+      const personalPromise = supabase.from('accounts').select('*');
+      const groupPromise = supabase.from('group_accounts').select('*');
+      const categoriesPromise = supabase.from('categories').select('*');
+      const transactionsPromise = supabase.from('transactions').select('*').order('date', { ascending: false });
+      
+      const notificationsPromise = session 
+        ? supabase.from('notifications').select('*').eq('user_id', session.user.id).order('created_at', { ascending: false })
+        : Promise.resolve({ data: [] });
+
+      // 3. Await all in parallel
+      const [
+        { data: profilesData },
+        { data: personalData },
+        { data: groupData },
+        { data: categoriesData },
+        { data: transactionsData },
+        { data: notifData }
+      ] = await Promise.all([
+        profilesPromise,
+        personalPromise,
+        groupPromise,
+        categoriesPromise,
+        transactionsPromise,
+        notificationsPromise
+      ]);
+
+      // 4. Process Results
       if (profilesData) {
         setUsers(profilesData.map(p => ({
           id: p.id,
@@ -61,12 +91,6 @@ export default function App() {
           avatar: p.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name || 'User')}&background=random`
         })));
       }
-
-      // Fetch Personal Accounts
-      const { data: personalData } = await supabase.from('accounts').select('*');
-      
-      // Fetch Group Accounts
-      const { data: groupData } = await supabase.from('group_accounts').select('*');
 
       let mergedAccounts: Account[] = [];
 
@@ -79,7 +103,7 @@ export default function App() {
           type: AccountType.PERSONAL,
           currency: a.currency,
           color: a.color,
-          isSuspended: a.is_suspended ?? false, // Default to false if null
+          isSuspended: a.is_suspended ?? false,
           members: []
         }))];
       }
@@ -93,21 +117,17 @@ export default function App() {
           type: AccountType.SHARED,
           currency: a.currency,
           color: a.color,
-          isSuspended: a.is_suspended ?? false, // Default to false if null
+          isSuspended: a.is_suspended ?? false,
           members: a.members || []
         }))];
       }
 
       setAccounts(mergedAccounts);
 
-      // Fetch Categories
-      const { data: categoriesData } = await supabase.from('categories').select('*');
       if (categoriesData) {
         setCategories(categoriesData);
       }
 
-      // Fetch Transactions
-      const { data: transactionsData } = await supabase.from('transactions').select('*').order('date', { ascending: false });
       if (transactionsData) {
         setTransactions(transactionsData.map(t => ({
           id: t.id,
@@ -121,28 +141,18 @@ export default function App() {
         })));
       }
 
-      // Fetch Notifications (if logged in)
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-          const { data: notifData } = await supabase
-            .from('notifications')
-            .select('*')
-            .eq('user_id', session.user.id)
-            .order('created_at', { ascending: false });
-          
-          if (notifData) {
-              setNotifications(notifData.map(n => ({
-                  id: n.id,
-                  userId: n.user_id,
-                  title: n.title,
-                  message: n.message,
-                  type: n.type,
-                  status: n.status || 'pending',
-                  isRead: n.is_read,
-                  createdAt: n.created_at,
-                  data: n.data
-              })));
-          }
+      if (notifData) {
+          setNotifications(notifData.map(n => ({
+              id: n.id,
+              userId: n.user_id,
+              title: n.title,
+              message: n.message,
+              type: n.type,
+              status: n.status || 'pending',
+              isRead: n.is_read,
+              createdAt: n.created_at,
+              data: n.data
+          })));
       }
 
     } catch (error) {
@@ -186,6 +196,7 @@ export default function App() {
                  role: profile.role || 'member',
                  avatar: profile.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(userName)}&background=random`
                });
+               // Optimized fetch
                await fetchData();
              }
           }
